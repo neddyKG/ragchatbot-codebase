@@ -153,3 +153,7 @@ On FastAPI startup, `app.py:startup_event`:
 
 **Source Tracking**: `CourseSearchTool.last_sources` populated during search, retrieved by `ToolManager`, returned in API response, then reset for next query.
 - always use uv to run the server do not use pip directly
+
+## Individual Preferences
+
+@~/.claude/projects-claude-local-md/ragchatbot-instructions.md
