@@ -106,13 +106,17 @@ class VectorStore:
                 query_texts=[course_name],
                 n_results=1
             )
-            
-            if results['documents'][0] and results['metadatas'][0]:
-                # Return the title (which is now the ID)
-                return results['metadatas'][0][0]['title']
+
+            if results['documents'][0] and results['metadatas'][0] and results['distances'][0]:
+                # Check if the match is close enough (distance threshold)
+                # Lower distance = better match. Using 1.5 as threshold for semantic similarity
+                distance = results['distances'][0][0]
+                if distance < 1.5:
+                    # Return the title (which is now the ID)
+                    return results['metadatas'][0][0]['title']
         except Exception as e:
             print(f"Error resolving course name: {e}")
-        
+
         return None
     
     def _build_filter(self, course_title: Optional[str], lesson_number: Optional[int]) -> Optional[Dict]:
@@ -264,4 +268,45 @@ class VectorStore:
             return None
         except Exception as e:
             print(f"Error getting lesson link: {e}")
-    
+            return None
+
+    def get_course_outline(self, course_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get full course outline including title, link, and all lessons.
+
+        Args:
+            course_name: Course name (can be partial or fuzzy match)
+
+        Returns:
+            Dictionary with course_title, course_link, and lessons list,
+            or None if course not found
+        """
+        import json
+        try:
+            # First resolve the course name using semantic search
+            course_title = self._resolve_course_name(course_name)
+            if not course_title:
+                return None
+
+            # Get course metadata by ID (title is the ID)
+            results = self.course_catalog.get(ids=[course_title])
+            if results and 'metadatas' in results and results['metadatas']:
+                metadata = results['metadatas'][0]
+
+                # Parse lessons from JSON
+                lessons = []
+                lessons_json = metadata.get('lessons_json')
+                if lessons_json:
+                    lessons = json.loads(lessons_json)
+
+                return {
+                    'course_title': metadata.get('title'),
+                    'course_link': metadata.get('course_link'),
+                    'instructor': metadata.get('instructor'),
+                    'lessons': lessons  # List of dicts with lesson_number, lesson_title, lesson_link
+                }
+
+            return None
+        except Exception as e:
+            print(f"Error getting course outline: {e}")
+            return None

@@ -1,0 +1,15 @@
+Course Title: Introduction to Machine Learning
+Course Link: https://example.com/ml-course
+Course Instructor: Dr. Jane Smith
+
+Lesson 0: What is Machine Learning?
+Lesson Link: https://example.com/ml-course/lesson-0
+Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. It focuses on developing computer programs that can access data and use it to learn for themselves. The primary aim is to allow computers to learn automatically without human intervention or assistance.
+
+Lesson 1: Supervised Learning Basics
+Lesson Link: https://example.com/ml-course/lesson-1
+Supervised learning is a type of machine learning where the algorithm learns from labeled training data. The model is trained on a dataset that includes both input features and corresponding output labels. Common algorithms include linear regression for continuous outputs and logistic regression for classification tasks. Decision trees and random forests are also popular supervised learning methods.
+
+Lesson 2: Neural Networks Introduction
+Lesson Link: https://example.com/ml-course/lesson-2
+Neural networks are computing systems inspired by biological neural networks in animal brains. They consist of interconnected nodes or neurons organized in layers. A typical neural network has an input layer, one or more hidden layers, and an output layer. Each connection between neurons has a weight that gets adjusted during training. Backpropagation is the key algorithm used to train neural networks by minimizing error.
