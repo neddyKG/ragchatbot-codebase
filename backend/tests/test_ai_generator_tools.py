@@ -21,6 +21,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ai_generator import AIGenerator
 from tests.fixtures.mock_responses import (
     get_mock_tool_use_response,
+    get_mock_tool_use_response_round2,
+    get_mock_tool_use_response_outline,
+    get_mock_tool_use_response_round3,
     get_mock_final_response,
     get_mock_direct_response,
     get_mock_bedrock_response_bytes
@@ -220,8 +223,8 @@ class TestAIGeneratorToolCalling:
         assert request['tools'] == tools
         assert request['tool_choice'] == {'type': 'auto'}
 
-    def test_second_call_removes_tools(self):
-        """Test second API call after tool execution doesn't include tools"""
+    def test_second_call_includes_tools_for_potential_round2(self):
+        """Test second API call after tool execution still includes tools (for potential round 2)"""
         ai_gen = self.create_mock_ai_generator()
 
         tool_use_response = get_mock_tool_use_response()
@@ -251,8 +254,254 @@ class TestAIGeneratorToolCalling:
         # First call should have tools
         assert 'tools' in captured_requests[0]
 
-        # Second call should NOT have tools
-        assert 'tools' not in captured_requests[1]
+        # Second call SHOULD have tools (round 1, can still do round 2)
+        assert 'tools' in captured_requests[1]
+
+    def test_single_round_still_works(self):
+        """Test that single-round tool calling still works (backward compatibility)"""
+        ai_gen = self.create_mock_ai_generator()
+
+        # Mock two responses: tool_use then final
+        tool_use_response = get_mock_tool_use_response()
+        final_response = get_mock_final_response()
+
+        ai_gen.client.invoke_model.side_effect = [
+            get_mock_bedrock_response_bytes(tool_use_response),
+            get_mock_bedrock_response_bytes(final_response)
+        ]
+
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.return_value = "ML search results"
+
+        tools = [{'name': 'search_course_content'}]
+
+        result = ai_gen.generate_response(
+            query="What is supervised learning?",
+            tools=tools,
+            tool_manager=mock_tool_manager
+        )
+
+        # Verify single round: 2 API calls, 1 tool execution
+        assert ai_gen.client.invoke_model.call_count == 2
+        assert mock_tool_manager.execute_tool.call_count == 1
+        assert "Supervised learning" in result
+
+    def test_two_round_sequential_calling(self):
+        """Test Claude can make 2 sequential tool calls"""
+        ai_gen = self.create_mock_ai_generator()
+
+        # Mock 3 responses: tool_use → tool_use → final
+        round1_response = get_mock_tool_use_response()
+        round2_response = get_mock_tool_use_response_round2()
+        final_response = get_mock_final_response()
+
+        ai_gen.client.invoke_model.side_effect = [
+            get_mock_bedrock_response_bytes(round1_response),
+            get_mock_bedrock_response_bytes(round2_response),
+            get_mock_bedrock_response_bytes(final_response)
+        ]
+
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.side_effect = [
+            "ML result about supervised learning",
+            "DL result about neural networks"
+        ]
+
+        tools = [{'name': 'search_course_content'}]
+
+        result = ai_gen.generate_response(
+            query="Compare ML and DL approaches",
+            tools=tools,
+            tool_manager=mock_tool_manager
+        )
+
+        # Verify 2 rounds: 3 API calls, 2 tool executions
+        assert ai_gen.client.invoke_model.call_count == 3
+        assert mock_tool_manager.execute_tool.call_count == 2
+        assert result is not None
+
+    def test_early_termination_after_round_1(self):
+        """Test Claude can terminate after round 1 if satisfied"""
+        ai_gen = self.create_mock_ai_generator()
+
+        # Mock 2 responses: tool_use → final (no more tool_use)
+        round1_response = get_mock_tool_use_response()
+        final_response = get_mock_final_response()
+
+        ai_gen.client.invoke_model.side_effect = [
+            get_mock_bedrock_response_bytes(round1_response),
+            get_mock_bedrock_response_bytes(final_response)
+        ]
+
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.return_value = "Sufficient results"
+
+        tools = [{'name': 'search_course_content'}]
+
+        result = ai_gen.generate_response(
+            query="Simple question",
+            tools=tools,
+            tool_manager=mock_tool_manager
+        )
+
+        # Verify early termination: only 2 API calls, 1 tool execution
+        assert ai_gen.client.invoke_model.call_count == 2
+        assert mock_tool_manager.execute_tool.call_count == 1
+        assert "Supervised learning" in result
+
+    def test_max_rounds_enforced(self):
+        """Test that tool calls are ignored after 2 rounds"""
+        ai_gen = self.create_mock_ai_generator()
+
+        # Mock 3 responses all with tool_use (Claude doesn't stop)
+        round1_response = get_mock_tool_use_response()
+        round2_response = get_mock_tool_use_response_round2()
+        round3_response = get_mock_tool_use_response_round3()  # Would be 3rd round
+
+        ai_gen.client.invoke_model.side_effect = [
+            get_mock_bedrock_response_bytes(round1_response),
+            get_mock_bedrock_response_bytes(round2_response),
+            get_mock_bedrock_response_bytes(round3_response)
+        ]
+
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.side_effect = ["Result 1", "Result 2"]
+
+        tools = [{'name': 'search_course_content'}]
+
+        result = ai_gen.generate_response(
+            query="Complex question",
+            tools=tools,
+            tool_manager=mock_tool_manager
+        )
+
+        # Verify hard limit: 3 API calls, but only 2 tool executions
+        assert ai_gen.client.invoke_model.call_count == 3
+        assert mock_tool_manager.execute_tool.call_count == 2
+        # Should extract text from round3_response despite tool_use
+        assert result is not None
+        assert "would like to search again" in result.lower()
+
+    def test_context_preserved_across_rounds(self):
+        """Test that message history is preserved across rounds"""
+        ai_gen = self.create_mock_ai_generator()
+
+        round1_response = get_mock_tool_use_response()
+        round2_response = get_mock_tool_use_response_round2()
+        final_response = get_mock_final_response()
+
+        captured_requests = []
+
+        def capture_invoke(modelId, body):
+            captured_requests.append(json.loads(body))
+            idx = len(captured_requests) - 1
+            if idx == 0:
+                return get_mock_bedrock_response_bytes(round1_response)
+            elif idx == 1:
+                return get_mock_bedrock_response_bytes(round2_response)
+            return get_mock_bedrock_response_bytes(final_response)
+
+        ai_gen.client.invoke_model.side_effect = capture_invoke
+
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.side_effect = ["Result 1", "Result 2"]
+
+        tools = [{'name': 'search_course_content'}]
+
+        ai_gen.generate_response(
+            query="Test",
+            tools=tools,
+            tool_manager=mock_tool_manager
+        )
+
+        # Verify message accumulation
+        assert len(captured_requests) == 3
+
+        # Initial call: 1 message (user query)
+        assert len(captured_requests[0]['messages']) == 1
+        assert captured_requests[0]['messages'][0]['role'] == 'user'
+
+        # After round 1: 3 messages (user + assistant + tool_results)
+        assert len(captured_requests[1]['messages']) == 3
+        assert captured_requests[1]['messages'][0]['role'] == 'user'
+        assert captured_requests[1]['messages'][1]['role'] == 'assistant'
+        assert captured_requests[1]['messages'][2]['role'] == 'user'
+
+        # After round 2: 5 messages
+        assert len(captured_requests[2]['messages']) == 5
+        assert captured_requests[2]['messages'][3]['role'] == 'assistant'
+        assert captured_requests[2]['messages'][4]['role'] == 'user'
+
+    def test_tools_included_in_both_rounds(self):
+        """Test tools are included in calls for rounds 1 and 2, but not final call"""
+        ai_gen = self.create_mock_ai_generator()
+
+        round1_response = get_mock_tool_use_response()
+        round2_response = get_mock_tool_use_response_round2()
+        round3_response = get_mock_tool_use_response_round3()
+
+        captured_requests = []
+
+        def capture_invoke(modelId, body):
+            captured_requests.append(json.loads(body))
+            idx = len(captured_requests) - 1
+            if idx == 0:
+                return get_mock_bedrock_response_bytes(round1_response)
+            elif idx == 1:
+                return get_mock_bedrock_response_bytes(round2_response)
+            return get_mock_bedrock_response_bytes(round3_response)
+
+        ai_gen.client.invoke_model.side_effect = capture_invoke
+
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.side_effect = ["Result 1", "Result 2"]
+
+        tools = [{'name': 'search_course_content'}]
+
+        ai_gen.generate_response(
+            query="Test",
+            tools=tools,
+            tool_manager=mock_tool_manager
+        )
+
+        # Call 1 (initial): has tools
+        assert 'tools' in captured_requests[0]
+        assert captured_requests[0]['tools'] == tools
+
+        # Call 2 (after round 1): has tools
+        assert 'tools' in captured_requests[1]
+        assert captured_requests[1]['tools'] == tools
+
+        # Call 3 (after round 2, final): NO tools
+        assert 'tools' not in captured_requests[2]
+
+    def test_tool_execution_error_handling(self):
+        """Test graceful handling when tool execution fails"""
+        ai_gen = self.create_mock_ai_generator()
+
+        tool_use_response = get_mock_tool_use_response()
+        final_response = get_mock_final_response()
+
+        ai_gen.client.invoke_model.side_effect = [
+            get_mock_bedrock_response_bytes(tool_use_response),
+            get_mock_bedrock_response_bytes(final_response)
+        ]
+
+        mock_tool_manager = Mock()
+        mock_tool_manager.execute_tool.side_effect = Exception("Tool execution failed")
+
+        tools = [{'name': 'search_course_content'}]
+
+        # Should not raise exception
+        result = ai_gen.generate_response(
+            query="Test",
+            tools=tools,
+            tool_manager=mock_tool_manager
+        )
+
+        # Should get final response despite tool error
+        assert result is not None
+        assert ai_gen.client.invoke_model.call_count == 2
 
 
 if __name__ == '__main__':

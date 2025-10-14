@@ -11,7 +11,10 @@ class AIGenerator:
 Tool Usage:
 - **search_course_content**: Use for questions about specific course content or detailed educational materials
 - **get_course_outline**: Use for questions about course structure, syllabus, lesson list, or course overview
-- **One tool call per query maximum**
+- **Sequential tool calling**: You can use tools up to 2 times in separate rounds to refine searches or gather additional information
+  * Round 1: Make initial tool call(s) to gather information
+  * Round 2: After seeing results, you may make additional tool call(s) if needed for comparisons, refinements, or multi-part questions
+  * Examples: (1) Get course outline to find lesson title → search for that topic, (2) Search one course → search another for comparison
 - Synthesize tool results into accurate, fact-based responses
 - If tool yields no results, state this clearly without offering alternatives
 
@@ -19,9 +22,10 @@ Response Protocol:
 - **General knowledge questions**: Answer using existing knowledge without using tools
 - **Course outline/structure questions**: Use get_course_outline tool to retrieve course title, course link, and complete lesson information (lesson numbers and titles)
 - **Course content questions**: Use search_course_content tool to find specific information
+- **Multi-step queries**: Use sequential tool calls when you need information from multiple sources or need to refine based on initial results
 - **No meta-commentary**:
  - Provide direct answers only — no reasoning process, tool explanations, or question-type analysis
- - Do not mention "based on the tool results" or "based on the search results"
+ - Do not mention "based on the tool results", "in round 1", or "based on the search results"
 
 
 All responses must be:
@@ -109,54 +113,151 @@ Provide only the direct answer to what was asked.
     
     def _handle_tool_execution(self, initial_response: Dict[str, Any], base_params: Dict[str, Any], tool_manager):
         """
-        Handle execution of tool calls and get follow-up response.
+        Handle execution of tool calls with support for sequential rounds (up to 2).
+
+        Round flow:
+        - Round 1: Execute tools from initial_response
+        - Round 2: If Claude returns tool_use again, execute and get final response
+        - Terminate: After 2 rounds OR when no tool_use blocks found
 
         Args:
             initial_response: The response body containing tool use requests
-            base_params: Base API parameters
+            base_params: Base API parameters (includes messages, system, and tools)
             tool_manager: Manager to execute tools
 
         Returns:
             Final response text after tool execution
         """
+        MAX_TOOL_ROUNDS = 2
+
         # Start with existing messages
         messages = base_params["messages"].copy()
 
-        # Add AI's tool use response
+        # Add AI's initial tool use response
         messages.append({"role": "assistant", "content": initial_response['content']})
 
-        # Execute all tool calls and collect results
+        current_round = 1
+        current_response = initial_response
+        tools = base_params.get("tools")
+
+        while current_round <= MAX_TOOL_ROUNDS:
+            # Execute tools from current response
+            tool_results = self._execute_tools_from_response(current_response, tool_manager)
+
+            # Add tool results to messages
+            if tool_results:
+                messages.append({"role": "user", "content": tool_results})
+
+            # Decide whether to include tools in next call
+            is_last_round = (current_round == MAX_TOOL_ROUNDS)
+            include_tools = not is_last_round
+
+            # Make next API call
+            next_response = self._make_followup_call(
+                messages,
+                base_params["system"],
+                include_tools,
+                tools
+            )
+
+            # Check termination conditions
+            if next_response['stop_reason'] != 'tool_use':
+                # No more tool calls - return final text
+                return self._extract_text_from_response(next_response)
+
+            if is_last_round:
+                # Hit max rounds - extract text from response (ignore tool_use blocks)
+                return self._extract_text_from_response(next_response)
+
+            # Prepare for next round
+            messages.append({"role": "assistant", "content": next_response['content']})
+            current_response = next_response
+            current_round += 1
+
+        # Fallback (should never reach here)
+        return "Unable to generate response after maximum tool rounds."
+
+    def _execute_tools_from_response(self, response: Dict[str, Any], tool_manager) -> List[Dict[str, Any]]:
+        """
+        Extract and execute all tool_use blocks from a response.
+
+        Args:
+            response: API response containing tool_use blocks
+            tool_manager: Manager to execute tools
+
+        Returns:
+            List of tool_result dicts
+        """
         tool_results = []
-        for content_block in initial_response['content']:
+        for content_block in response['content']:
             if content_block.get('type') == "tool_use":
-                tool_result = tool_manager.execute_tool(
-                    content_block['name'],
-                    **content_block['input']
-                )
+                try:
+                    tool_result = tool_manager.execute_tool(
+                        content_block['name'],
+                        **content_block['input']
+                    )
+                except Exception as e:
+                    # Return error as tool result
+                    tool_result = f"Error executing tool '{content_block['name']}': {str(e)}"
 
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": content_block['id'],
                     "content": tool_result
                 })
+        return tool_results
 
-        # Add tool results as single message
-        if tool_results:
-            messages.append({"role": "user", "content": tool_results})
+    def _make_followup_call(self, messages: List[Dict], system_content: str, include_tools: bool, tools: Optional[List]) -> Dict[str, Any]:
+        """
+        Make a followup API call with current message history.
 
-        # Prepare final API call without tools
-        final_request = {
+        Args:
+            messages: Current message history
+            system_content: System prompt content
+            include_tools: Whether to include tools in this call
+            tools: Tool definitions (if include_tools is True)
+
+        Returns:
+            API response body
+        """
+        request_body = {
             **self.base_params,
             "anthropic_version": "bedrock-2023-05-31",
             "messages": messages,
-            "system": base_params["system"]
+            "system": system_content
         }
 
-        # Get final response from Bedrock
-        final_bedrock_response = self.client.invoke_model(
+        # Only include tools if not on final round
+        if include_tools and tools:
+            request_body["tools"] = tools
+            request_body["tool_choice"] = {"type": "auto"}
+
+        response = self.client.invoke_model(
             modelId=self.model_id,
-            body=json.dumps(final_request)
+            body=json.dumps(request_body)
         )
 
-        final_response_body = json.loads(final_bedrock_response['body'].read())
-        return final_response_body['content'][0]['text']
+        return json.loads(response['body'].read())
+
+    def _extract_text_from_response(self, response: Dict[str, Any]) -> str:
+        """
+        Extract text content from response, ignoring tool_use blocks.
+
+        Used for normal responses and when max rounds reached but Claude still
+        wants to use tools.
+
+        Args:
+            response: API response body
+
+        Returns:
+            Extracted text or fallback message
+        """
+        text_blocks = [
+            block['text'] for block in response['content']
+            if block.get('type') == 'text'
+        ]
+
+        if not text_blocks:
+            return "Unable to provide a complete response."
+
+        return ' '.join(text_blocks)

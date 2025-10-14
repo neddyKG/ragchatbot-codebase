@@ -109,9 +109,10 @@ class VectorStore:
 
             if results['documents'][0] and results['metadatas'][0] and results['distances'][0]:
                 # Check if the match is close enough (distance threshold)
-                # Lower distance = better match. Using 1.5 as threshold for semantic similarity
+                # Lower distance = better match. Using 2.0 as threshold for semantic similarity
+                # Increased from 1.5 to allow better fuzzy matching (e.g., "MCP" -> "MCP: Build Rich-Context AI Apps")
                 distance = results['distances'][0][0]
-                if distance < 1.5:
+                if distance < 2.0:
                     # Return the title (which is now the ID)
                     return results['metadatas'][0][0]['title']
         except Exception as e:
