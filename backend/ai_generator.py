@@ -1,10 +1,12 @@
-import boto3
 import json
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
+import boto3
+
 
 class AIGenerator:
     """Handles interactions with Anthropic's Claude API for generating responses"""
-    
+
     # Static system prompt to avoid rebuilding on each call
     SYSTEM_PROMPT = """ You are an AI assistant specialized in course materials and educational content with access to comprehensive tools for course information.
 
@@ -35,59 +37,66 @@ All responses must be:
 4. **Example-supported** - Include relevant examples when they aid understanding
 Provide only the direct answer to what was asked.
 """
-    
-    def __init__(self, aws_access_key_id: str, aws_secret_access_key: str, aws_session_token: str, aws_region: str, model_id: str):
+
+    def __init__(
+        self,
+        aws_access_key_id: str,
+        aws_secret_access_key: str,
+        aws_session_token: str,
+        aws_region: str,
+        model_id: str,
+    ):
         # Build client config
         client_config = {
-            'service_name': 'bedrock-runtime',
-            'region_name': aws_region,
-            'aws_access_key_id': aws_access_key_id,
-            'aws_secret_access_key': aws_secret_access_key
+            "service_name": "bedrock-runtime",
+            "region_name": aws_region,
+            "aws_access_key_id": aws_access_key_id,
+            "aws_secret_access_key": aws_secret_access_key,
         }
 
         # Add session token if provided (for temporary credentials)
         if aws_session_token:
-            client_config['aws_session_token'] = aws_session_token
+            client_config["aws_session_token"] = aws_session_token
 
         self.client = boto3.client(**client_config)
         self.model_id = model_id
 
         # Pre-build base API parameters
-        self.base_params = {
-            "temperature": 0,
-            "max_tokens": 800
-        }
-    
-    def generate_response(self, query: str,
-                         conversation_history: Optional[str] = None,
-                         tools: Optional[List] = None,
-                         tool_manager=None) -> str:
+        self.base_params = {"temperature": 0, "max_tokens": 800}
+
+    def generate_response(
+        self,
+        query: str,
+        conversation_history: Optional[str] = None,
+        tools: Optional[List] = None,
+        tool_manager=None,
+    ) -> str:
         """
         Generate AI response with optional tool usage and conversation context.
-        
+
         Args:
             query: The user's question or request
             conversation_history: Previous messages for context
             tools: Available tools the AI can use
             tool_manager: Manager to execute tools
-            
+
         Returns:
             Generated response as string
         """
-        
+
         # Build system content efficiently - avoid string ops when possible
         system_content = (
             f"{self.SYSTEM_PROMPT}\n\nPrevious conversation:\n{conversation_history}"
-            if conversation_history 
+            if conversation_history
             else self.SYSTEM_PROMPT
         )
-        
+
         # Prepare API call parameters for Bedrock
         request_body = {
             **self.base_params,
             "anthropic_version": "bedrock-2023-05-31",
             "messages": [{"role": "user", "content": query}],
-            "system": system_content
+            "system": system_content,
         }
 
         # Add tools if available
@@ -97,21 +106,22 @@ Provide only the direct answer to what was asked.
 
         # Get response from Claude via Bedrock
         bedrock_response = self.client.invoke_model(
-            modelId=self.model_id,
-            body=json.dumps(request_body)
+            modelId=self.model_id, body=json.dumps(request_body)
         )
 
         # Parse response
-        response_body = json.loads(bedrock_response['body'].read())
+        response_body = json.loads(bedrock_response["body"].read())
 
         # Handle tool execution if needed
-        if response_body['stop_reason'] == "tool_use" and tool_manager:
+        if response_body["stop_reason"] == "tool_use" and tool_manager:
             return self._handle_tool_execution(response_body, request_body, tool_manager)
 
         # Return direct response
-        return response_body['content'][0]['text']
-    
-    def _handle_tool_execution(self, initial_response: Dict[str, Any], base_params: Dict[str, Any], tool_manager):
+        return response_body["content"][0]["text"]
+
+    def _handle_tool_execution(
+        self, initial_response: Dict[str, Any], base_params: Dict[str, Any], tool_manager
+    ):
         """
         Handle execution of tool calls with support for sequential rounds (up to 2).
 
@@ -134,7 +144,7 @@ Provide only the direct answer to what was asked.
         messages = base_params["messages"].copy()
 
         # Add AI's initial tool use response
-        messages.append({"role": "assistant", "content": initial_response['content']})
+        messages.append({"role": "assistant", "content": initial_response["content"]})
 
         current_round = 1
         current_response = initial_response
@@ -149,19 +159,16 @@ Provide only the direct answer to what was asked.
                 messages.append({"role": "user", "content": tool_results})
 
             # Decide whether to include tools in next call
-            is_last_round = (current_round == MAX_TOOL_ROUNDS)
+            is_last_round = current_round == MAX_TOOL_ROUNDS
             include_tools = not is_last_round
 
             # Make next API call
             next_response = self._make_followup_call(
-                messages,
-                base_params["system"],
-                include_tools,
-                tools
+                messages, base_params["system"], include_tools, tools
             )
 
             # Check termination conditions
-            if next_response['stop_reason'] != 'tool_use':
+            if next_response["stop_reason"] != "tool_use":
                 # No more tool calls - return final text
                 return self._extract_text_from_response(next_response)
 
@@ -170,14 +177,16 @@ Provide only the direct answer to what was asked.
                 return self._extract_text_from_response(next_response)
 
             # Prepare for next round
-            messages.append({"role": "assistant", "content": next_response['content']})
+            messages.append({"role": "assistant", "content": next_response["content"]})
             current_response = next_response
             current_round += 1
 
         # Fallback (should never reach here)
         return "Unable to generate response after maximum tool rounds."
 
-    def _execute_tools_from_response(self, response: Dict[str, Any], tool_manager) -> List[Dict[str, Any]]:
+    def _execute_tools_from_response(
+        self, response: Dict[str, Any], tool_manager
+    ) -> List[Dict[str, Any]]:
         """
         Extract and execute all tool_use blocks from a response.
 
@@ -189,25 +198,28 @@ Provide only the direct answer to what was asked.
             List of tool_result dicts
         """
         tool_results = []
-        for content_block in response['content']:
-            if content_block.get('type') == "tool_use":
+        for content_block in response["content"]:
+            if content_block.get("type") == "tool_use":
                 try:
                     tool_result = tool_manager.execute_tool(
-                        content_block['name'],
-                        **content_block['input']
+                        content_block["name"], **content_block["input"]
                     )
                 except Exception as e:
                     # Return error as tool result
                     tool_result = f"Error executing tool '{content_block['name']}': {str(e)}"
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": content_block['id'],
-                    "content": tool_result
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": content_block["id"],
+                        "content": tool_result,
+                    }
+                )
         return tool_results
 
-    def _make_followup_call(self, messages: List[Dict], system_content: str, include_tools: bool, tools: Optional[List]) -> Dict[str, Any]:
+    def _make_followup_call(
+        self, messages: List[Dict], system_content: str, include_tools: bool, tools: Optional[List]
+    ) -> Dict[str, Any]:
         """
         Make a followup API call with current message history.
 
@@ -224,7 +236,7 @@ Provide only the direct answer to what was asked.
             **self.base_params,
             "anthropic_version": "bedrock-2023-05-31",
             "messages": messages,
-            "system": system_content
+            "system": system_content,
         }
 
         # Only include tools if not on final round
@@ -232,12 +244,9 @@ Provide only the direct answer to what was asked.
             request_body["tools"] = tools
             request_body["tool_choice"] = {"type": "auto"}
 
-        response = self.client.invoke_model(
-            modelId=self.model_id,
-            body=json.dumps(request_body)
-        )
+        response = self.client.invoke_model(modelId=self.model_id, body=json.dumps(request_body))
 
-        return json.loads(response['body'].read())
+        return json.loads(response["body"].read())
 
     def _extract_text_from_response(self, response: Dict[str, Any]) -> str:
         """
@@ -253,11 +262,10 @@ Provide only the direct answer to what was asked.
             Extracted text or fallback message
         """
         text_blocks = [
-            block['text'] for block in response['content']
-            if block.get('type') == 'text'
+            block["text"] for block in response["content"] if block.get("type") == "text"
         ]
 
         if not text_blocks:
             return "Unable to provide a complete response."
 
-        return ' '.join(text_blocks)
+        return " ".join(text_blocks)

@@ -8,25 +8,26 @@ These tests verify the complete flow:
 4. Test with mock AI responses to isolate vector store issues
 """
 
-import pytest
 import os
+import shutil
 import sys
 import tempfile
-import shutil
 from unittest.mock import Mock, patch
+
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rag_system import RAGSystem
 from config import Config
 from document_processor import DocumentProcessor
-from vector_store import VectorStore
+from rag_system import RAGSystem
 from tests.fixtures.mock_responses import (
-    get_mock_tool_use_response,
+    get_mock_bedrock_response_bytes,
     get_mock_final_response,
-    get_mock_bedrock_response_bytes
+    get_mock_tool_use_response,
 )
+from vector_store import VectorStore
 
 
 class TestRAGSystemIntegration:
@@ -51,13 +52,13 @@ class TestRAGSystemIntegration:
         """Create vector store and load sample course"""
         # Initialize components
         processor = DocumentProcessor(test_config.CHUNK_SIZE, test_config.CHUNK_OVERLAP)
-        store = VectorStore(test_config.CHROMA_PATH, test_config.EMBEDDING_MODEL, test_config.MAX_RESULTS)
+        store = VectorStore(
+            test_config.CHROMA_PATH, test_config.EMBEDDING_MODEL, test_config.MAX_RESULTS
+        )
 
         # Load sample course
         sample_course_path = os.path.join(
-            os.path.dirname(__file__),
-            'fixtures',
-            'sample_course.txt'
+            os.path.dirname(__file__), "fixtures", "sample_course.txt"
         )
 
         course, chunks = processor.process_course_document(sample_course_path)
@@ -92,8 +93,7 @@ class TestRAGSystemIntegration:
         # Should find content about neural networks
         assert not results.is_empty()
         found_neural_network_content = any(
-            "neural network" in doc.lower()
-            for doc in results.documents
+            "neural network" in doc.lower() for doc in results.documents
         )
         assert found_neural_network_content, "Expected to find neural network content"
 
@@ -125,13 +125,13 @@ class TestRAGSystemIntegration:
 
         # Verify sources have expected structure
         source = tool.last_sources[0]
-        assert 'text' in source
-        assert 'link' in source
+        assert "text" in source
+        assert "link" in source
 
     def test_rag_system_query_with_mock_ai(self, test_config, vector_store_with_data):
         """Test full RAG system query with mocked AI responses"""
         # Create RAG system with mocked AI
-        with patch('rag_system.AIGenerator') as MockAIGen:
+        with patch("rag_system.AIGenerator") as MockAIGen:
             # Setup mock AI generator
             mock_ai_instance = Mock()
 
@@ -141,9 +141,9 @@ class TestRAGSystemIntegration:
                 if tools and tool_manager:
                     # Execute the search tool
                     result = tool_manager.execute_tool(
-                        'search_course_content',
-                        query='supervised learning',
-                        course_name='Machine Learning'
+                        "search_course_content",
+                        query="supervised learning",
+                        course_name="Machine Learning",
                     )
                     return f"Based on the search results: {result[:100]}..."
                 return "Direct answer"
@@ -202,7 +202,7 @@ class TestRAGSystemIntegration:
 
     def test_tool_manager_routing(self, vector_store_with_data):
         """Test ToolManager correctly routes to different tools"""
-        from search_tools import ToolManager, CourseSearchTool, CourseOutlineTool
+        from search_tools import CourseOutlineTool, CourseSearchTool, ToolManager
 
         manager = ToolManager()
         search_tool = CourseSearchTool(vector_store_with_data)
@@ -212,27 +212,27 @@ class TestRAGSystemIntegration:
         manager.register_tool(outline_tool)
 
         # Test search tool
-        result = manager.execute_tool('search_course_content', query='neural networks')
+        result = manager.execute_tool("search_course_content", query="neural networks")
         assert "neural network" in result.lower() or "no relevant content" in result.lower()
 
         # Test outline tool
-        result = manager.execute_tool('get_course_outline', course_title='Machine Learning')
+        result = manager.execute_tool("get_course_outline", course_title="Machine Learning")
         assert "Course:" in result and "Lesson" in result
 
         # Test invalid tool
-        result = manager.execute_tool('nonexistent_tool')
+        result = manager.execute_tool("nonexistent_tool")
         assert "not found" in result.lower()
 
     def test_source_tracking_and_reset(self, vector_store_with_data):
         """Test that sources are tracked and reset correctly"""
-        from search_tools import ToolManager, CourseSearchTool
+        from search_tools import CourseSearchTool, ToolManager
 
         manager = ToolManager()
         tool = CourseSearchTool(vector_store_with_data)
         manager.register_tool(tool)
 
         # Execute search
-        manager.execute_tool('search_course_content', query='supervised learning')
+        manager.execute_tool("search_course_content", query="supervised learning")
 
         # Get sources
         sources = manager.get_last_sources()
@@ -246,5 +246,5 @@ class TestRAGSystemIntegration:
         assert len(sources_after) == 0
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

@@ -8,10 +8,11 @@ These tests verify that the CourseSearchTool correctly:
 4. Handles edge cases (empty results, errors, filters)
 """
 
-import pytest
-import sys
 import os
-from unittest.mock import Mock, MagicMock
+import sys
+from unittest.mock import MagicMock, Mock
+
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,14 +31,14 @@ class TestCourseSearchToolExecute:
         mock_results = SearchResults(
             documents=[
                 "Machine learning is a subset of AI that enables systems to learn.",
-                "Supervised learning uses labeled training data."
+                "Supervised learning uses labeled training data.",
             ],
             metadata=[
-                {'course_title': 'Introduction to Machine Learning', 'lesson_number': 0},
-                {'course_title': 'Introduction to Machine Learning', 'lesson_number': 1}
+                {"course_title": "Introduction to Machine Learning", "lesson_number": 0},
+                {"course_title": "Introduction to Machine Learning", "lesson_number": 1},
             ],
             distances=[0.1, 0.2],
-            error=None
+            error=None,
         )
         mock_store.search.return_value = mock_results
         mock_store.get_lesson_link.return_value = "https://example.com/ml-course/lesson-0"
@@ -48,9 +49,7 @@ class TestCourseSearchToolExecute:
 
         # Verify search was called correctly
         mock_store.search.assert_called_once_with(
-            query="machine learning",
-            course_name="ML",
-            lesson_number=None
+            query="machine learning", course_name="ML", lesson_number=None
         )
 
         # Verify result format
@@ -64,9 +63,9 @@ class TestCourseSearchToolExecute:
         mock_store = Mock()
         mock_results = SearchResults(
             documents=["Test content"],
-            metadata=[{'course_title': 'Test Course', 'lesson_number': 1}],
+            metadata=[{"course_title": "Test Course", "lesson_number": 1}],
             distances=[0.1],
-            error=None
+            error=None,
         )
         mock_store.search.return_value = mock_results
         mock_store.get_lesson_link.return_value = "https://example.com/test/lesson-1"
@@ -76,18 +75,13 @@ class TestCourseSearchToolExecute:
 
         # Verify sources were tracked
         assert len(tool.last_sources) == 1
-        assert tool.last_sources[0]['text'] == "Test Course - Lesson 1"
-        assert tool.last_sources[0]['link'] == "https://example.com/test/lesson-1"
+        assert tool.last_sources[0]["text"] == "Test Course - Lesson 1"
+        assert tool.last_sources[0]["link"] == "https://example.com/test/lesson-1"
 
     def test_execute_with_empty_results(self):
         """Test execute returns appropriate message when no results found"""
         mock_store = Mock()
-        mock_results = SearchResults(
-            documents=[],
-            metadata=[],
-            distances=[],
-            error=None
-        )
+        mock_results = SearchResults(documents=[], metadata=[], distances=[], error=None)
         mock_store.search.return_value = mock_results
 
         tool = CourseSearchTool(mock_store)
@@ -98,12 +92,7 @@ class TestCourseSearchToolExecute:
     def test_execute_with_course_filter(self):
         """Test execute includes course name in 'not found' message"""
         mock_store = Mock()
-        mock_results = SearchResults(
-            documents=[],
-            metadata=[],
-            distances=[],
-            error=None
-        )
+        mock_results = SearchResults(documents=[], metadata=[], distances=[], error=None)
         mock_store.search.return_value = mock_results
 
         tool = CourseSearchTool(mock_store)
@@ -114,12 +103,7 @@ class TestCourseSearchToolExecute:
     def test_execute_with_lesson_filter(self):
         """Test execute includes lesson number in 'not found' message"""
         mock_store = Mock()
-        mock_results = SearchResults(
-            documents=[],
-            metadata=[],
-            distances=[],
-            error=None
-        )
+        mock_results = SearchResults(documents=[], metadata=[], distances=[], error=None)
         mock_store.search.return_value = mock_results
 
         tool = CourseSearchTool(mock_store)
@@ -131,10 +115,7 @@ class TestCourseSearchToolExecute:
         """Test execute returns error message when search fails"""
         mock_store = Mock()
         mock_results = SearchResults(
-            documents=[],
-            metadata=[],
-            distances=[],
-            error="Database connection failed"
+            documents=[], metadata=[], distances=[], error="Database connection failed"
         )
         mock_store.search.return_value = mock_results
 
@@ -148,9 +129,9 @@ class TestCourseSearchToolExecute:
         mock_store = Mock()
         mock_results = SearchResults(
             documents=["General course information"],
-            metadata=[{'course_title': 'Test Course', 'lesson_number': None}],
+            metadata=[{"course_title": "Test Course", "lesson_number": None}],
             distances=[0.1],
-            error=None
+            error=None,
         )
         mock_store.search.return_value = mock_results
 
@@ -166,9 +147,9 @@ class TestCourseSearchToolExecute:
         mock_store = Mock()
         mock_results = SearchResults(
             documents=["Test content"],
-            metadata=[{'course_title': 'Test Course', 'lesson_number': 1}],
+            metadata=[{"course_title": "Test Course", "lesson_number": 1}],
             distances=[0.1],
-            error=None
+            error=None,
         )
         mock_store.search.return_value = mock_results
         mock_store.get_lesson_link.return_value = None
@@ -178,7 +159,7 @@ class TestCourseSearchToolExecute:
 
         # Verify source tracked with None link
         assert len(tool.last_sources) == 1
-        assert tool.last_sources[0]['link'] is None
+        assert tool.last_sources[0]["link"] is None
 
     def test_get_tool_definition(self):
         """Test tool definition is correctly formatted for Anthropic API"""
@@ -186,14 +167,14 @@ class TestCourseSearchToolExecute:
         tool = CourseSearchTool(mock_store)
         definition = tool.get_tool_definition()
 
-        assert definition['name'] == 'search_course_content'
-        assert 'description' in definition
-        assert 'input_schema' in definition
-        assert definition['input_schema']['required'] == ['query']
-        assert 'query' in definition['input_schema']['properties']
-        assert 'course_name' in definition['input_schema']['properties']
-        assert 'lesson_number' in definition['input_schema']['properties']
+        assert definition["name"] == "search_course_content"
+        assert "description" in definition
+        assert "input_schema" in definition
+        assert definition["input_schema"]["required"] == ["query"]
+        assert "query" in definition["input_schema"]["properties"]
+        assert "course_name" in definition["input_schema"]["properties"]
+        assert "lesson_number" in definition["input_schema"]["properties"]
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
